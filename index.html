@@ -38,7 +38,9 @@
 .inv-table td.check-col .status-btn{min-width:69px;justify-content:center}
 .inv-table .status-btn input[type=checkbox]{width:17px;height:17px}
 .inv-table .status-btn input[type=checkbox]:checked:after{font-size:12px;top:-2px;left:2px}
-.inv-table .bar-code{white-space:normal;overflow-wrap:anywhere}
+/* Mantener cada código de barras completo en una sola línea, con desplazamiento horizontal de tabla si es necesario. */
+.inv-table th.code-col,.inv-table td.code-col{width:auto;min-width:max-content;max-width:none;white-space:nowrap}
+.inv-table .bar-code{display:block;white-space:nowrap;overflow-wrap:normal;word-break:normal;width:max-content;max-width:none;font-variant-numeric:tabular-nums}
 .inv-table .status-btn.incident-mark{font-size:10px;color:#90641c;border-color:#efca71;background:#fff4d6;padding:6px 7px;min-width:78px}
 .settings-dialog,.manual-dialog{width:min(760px,100%);background:white;border-radius:16px;box-shadow:0 22px 65px #06172d73;max-height:min(92dvh,900px);overflow:auto}
 .settings-dialog .config{padding:24px}
@@ -74,7 +76,7 @@
  .table-wrap{max-height:61vh}
  .inv-table th,.inv-table td{padding:9px 10px}
  .inv-table th.check-col,.inv-table td.check-col{min-width:83px;width:83px}
- .inv-table th.code-col,.inv-table td.code-col{left:83px;min-width:120px;max-width:145px}
+ .inv-table th.code-col,.inv-table td.code-col{left:83px;min-width:max-content;max-width:none;width:auto}
  .inv-table td.check-col .status-btn{padding:6px 7px;min-width:60px}
  .inv-table .bar-code{font-size:12px}
  .settings-dialog,.manual-dialog{max-height:94dvh;width:100%}
@@ -226,9 +228,29 @@ https://github.com/nodeca/pako/blob/main/LICENSE
  function updateStats(){const c=getSummary(),tot=rows.length;for(const [k,id] of Object.entries({yes:'statYes',no:'statNo',incident:'statIncident',commented:'statComment'}))$(id).textContent=c[k];$('statTotal').textContent=tot;$('statRate').textContent=`${tot?Math.round(c.commented/tot*100):0}% con observación`;$('progressTrack').innerHTML=['yes','no','incident'].map((key,i)=>`<div class="progress-fill ${['g','r','a'][i]}" style="width:${tot?100*c[key]/tot:0}%" title="${STATUS[key]}: ${c[key]}"></div>`).join('');$('exportSummary').innerHTML=source?`<b>${c.yes} sí</b> · ${c.no} no · ${c.incident} incidencias · ${tot} tarjetas`:'<b>Sin archivo</b> · Importa un Excel para comenzar';updateFilename()}
  function exportFilename(){const s=source?.meta||{},name=s.filenameModule?.trim()||'MODULO SIN DEFINIR',week=s.week||47,ext=source?.ext||'xlsx';return `Inventario ${name} Semana ${week}.${ext}`.replace(/[\\/:*?"<>|]/g,'').replace(/\s+/g,' ').trim()}
  function updateFilename(){$('exportName').textContent=source?exportFilename():'Inventario Módulo x Semana 47.xlsx'}
- function setCurrentRowStatus(row,status){const old=effectiveStatus(row);const next=old===status?'no':status;const e=source.states[row.key]||(source.states[row.key]={});e.status=next;persist();renderAll(false)}
+ function setCurrentRowStatus(row,status){
+ const old=effectiveStatus(row),next=old===status?'no':status;
+ const e=source.states[row.key]||(source.states[row.key]={});e.status=next;
+ persist();updateStats();
+ // Actualizar únicamente la fila marcada: sustituir toda la tabla reinicia el desplazamiento
+ // y hace que el usuario pierda de vista la siguiente tarjeta.
+ const tr=Array.from($('tableContent').querySelectorAll('tbody tr[data-key]')).find(el=>el.dataset.key===row.key);
+ if(tr&&($('filter').value==='all'||$('filter').value===next)){
+   tr.classList.remove('selected-yes','selected-no','selected-incident');tr.classList.add('selected-'+next);
+   const checkbox=tr.querySelector('input[data-status="yes"]');
+   if(checkbox){checkbox.checked=next==='yes';const label=checkbox.closest('label');
+     label.classList.toggle('active',next==='yes');
+     label.title=next==='yes'?'Desmarcar: No la tenemos':'Marcar: Sí tenemos';}
+   const controls=tr.querySelector('.status-controls'),mark=controls?.querySelector('.incident-mark');
+   if(next==='incident'&&!mark)controls.insertAdjacentHTML('beforeend','<span class="status-btn incident-mark" title="Incidencia registrada en el detalle">⚠ Incid.</span>');
+   else if(next!=='incident'&&mark)mark.remove();
+   return;
+ }
+ // En vistas filtradas la fila puede desaparecer: reconstruir manteniendo scroll.
+ renderTable();
+}
  function statusHTML(row){const st=effectiveStatus(row);return `<label class="status-btn yes ${st==='yes'?'active':''}" title="${st==='yes'?'Desmarcar: No la tenemos':'Marcar: Sí tenemos'}"><input type="checkbox" data-status="yes" data-key="${escapeHtml(row.key)}" ${st==='yes'?'checked':''} aria-label="Sí tenemos la tarjeta ${escapeHtml(row.barcode)}" />Sí</label>${st==='incident'?'<span class="status-btn incident-mark" title="Incidencia registrada en el detalle">⚠ Incid.</span>':''}`}
- function renderTable(){const content=$('tableContent');$('pagination').classList.add('hide');if(!source){content.innerHTML='<div class="empty"><div class="huge">▤</div><h2>Inventario listo para comenzar</h2><p>Importa un Excel para marcar las tarjetas. Se conservarán los títulos, formatos, hojas y códigos originales al exportar.</p><button class="btn primary" id="emptyUpload">Cargar archivo Excel</button></div>';$('emptyUpload').onclick=()=> $('fileInput').click();return}
+ function renderTable(){const content=$('tableContent');const previousTable=content.querySelector('.table-wrap');const scrollPosition=previousTable?{top:previousTable.scrollTop,left:previousTable.scrollLeft}:null;$('pagination').classList.add('hide');if(!source){content.innerHTML='<div class="empty"><div class="huge">▤</div><h2>Inventario listo para comenzar</h2><p>Importa un Excel para marcar las tarjetas. Se conservarán los títulos, formatos, hojas y códigos originales al exportar.</p><button class="btn primary" id="emptyUpload">Cargar archivo Excel</button></div>';$('emptyUpload').onclick=()=> $('fileInput').click();return}
  if(!getConfig(active).barcodeCol){content.innerHTML='<div class="empty"><div class="huge">⌕</div><h2>Selecciona la columna de códigos de barras</h2><p>No fue posible encontrar con seguridad la columna del código. Abre Ajustes, selecciona la hoja, la fila de encabezados y la columna de barras.</p><button class="btn blue" id="fixMapping">Configurar columnas</button></div>';$('fixMapping').onclick=()=>showSettings(true);return}
  const query=normalize($('search').value),filter=$('filter').value;const filtered=rows.filter(r=>{const st=effectiveStatus(r)||'pending';if(filter!=='all'&&st!==filter)return false;if(!query)return true;return normalize([r.barcode,r.id,r.module, effectiveComment(r),...Object.values(r.raw.vals)].join(' ')).includes(query)});
  const size=Number($('pageSize').value)||100, max=Math.max(0,Math.ceil(filtered.length/size)-1);page=Math.max(0,Math.min(page,max));const part=filtered.slice(page*size,(page+1)*size);$('listSub').textContent=`${filtered.length} de ${rows.length} tarjetas · Hoja: ${active.name}`;
@@ -237,7 +259,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
  const colSet=new Set(Object.keys(head?.vals||{}));for(const raw of active.rows)if(raw.n>cfg.headerRow)for(const col of Object.keys(raw.vals))colSet.add(col);
  const extraCols=Array.from(colSet).filter(c=>c!==cfg.barcodeCol&&c!=='H').sort((a,b)=>colNum(a)-colNum(b));
  const extraTh=extraCols.map(c=>`<th title="Columna ${c}">${escapeHtml(getV(head,c)||'Columna '+c)}</th>`).join('');
- const table=`<div class="table-wrap"><table class="inv-table"><thead><tr><th class="check-col">¿Sí?</th><th class="code-col">Código de barras</th>${extraTh}<th>Comentario (H)</th><th>Fila</th><th>Detalle</th></tr></thead><tbody>${part.map(r=>{const st=effectiveStatus(r),com=effectiveComment(r),extra=extraCols.map(c=>`<td title="${escapeHtml(getV(r.raw,c))}"><span class="cell-value">${escapeHtml(getV(r.raw,c))||'—'}</span></td>`).join('');return `<tr data-key="${escapeHtml(r.key)}" tabindex="0" class="selected-${st}" aria-label="Abrir detalle de tarjeta ${escapeHtml(r.barcode)}"><td class="check-col"><div class="status-controls">${statusHTML(r)}</div></td><td class="code-col"><div class="bar-code">${escapeHtml(r.barcode)}</div></td>${extra}<td><div class="comment-preview ${com?'':'no-comment'}" title="${escapeHtml(com)}">${escapeHtml(com)||'Añadir comentario'}</div></td><td class="tiny">${r.n}</td><td><span class="view-icon" title="Ver detalles">›</span></td></tr>`}).join('')}</tbody></table></div>`;content.innerHTML=table;
+ const table=`<div class="table-wrap"><table class="inv-table"><thead><tr><th class="check-col">¿Sí?</th><th class="code-col">Código de barras</th>${extraTh}<th>Comentario (H)</th><th>Fila</th><th>Detalle</th></tr></thead><tbody>${part.map(r=>{const st=effectiveStatus(r),com=effectiveComment(r),extra=extraCols.map(c=>`<td title="${escapeHtml(getV(r.raw,c))}"><span class="cell-value">${escapeHtml(getV(r.raw,c))||'—'}</span></td>`).join('');return `<tr data-key="${escapeHtml(r.key)}" tabindex="0" class="selected-${st}" aria-label="Abrir detalle de tarjeta ${escapeHtml(r.barcode)}"><td class="check-col"><div class="status-controls">${statusHTML(r)}</div></td><td class="code-col"><div class="bar-code">${escapeHtml(r.barcode)}</div></td>${extra}<td><div class="comment-preview ${com?'':'no-comment'}" title="${escapeHtml(com)}">${escapeHtml(com)||'Añadir comentario'}</div></td><td class="tiny">${r.n}</td><td><span class="view-icon" title="Ver detalles">›</span></td></tr>`}).join('')}</tbody></table></div>`;content.innerHTML=table;if(scrollPosition){const nextTable=content.querySelector('.table-wrap');if(nextTable){nextTable.scrollTop=scrollPosition.top;nextTable.scrollLeft=scrollPosition.left}}
  content.querySelectorAll('.status-btn').forEach(label=>label.addEventListener('click',e=>e.stopPropagation()));content.querySelectorAll('input[data-status]').forEach(cb=>cb.addEventListener('change',e=>{e.stopPropagation();const row=rows.find(r=>r.key===cb.dataset.key);if(row)setCurrentRowStatus(row,cb.dataset.status)}));
  content.querySelectorAll('tbody tr[data-key]').forEach(tr=>{const open=()=>{const r=rows.find(r=>r.key===tr.dataset.key);if(r)openModal(r)};tr.addEventListener('click',open);tr.addEventListener('keydown',e=>{if(e.target===tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault();open()}})});
  $('pagination').classList.toggle('hide',filtered.length<=size);$('pageLabel').textContent=`Mostrando ${page*size+1}–${Math.min((page+1)*size,filtered.length)} de ${filtered.length}`;$('prevPage').disabled=page===0;$('nextPage').disabled=page===max}
